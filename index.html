@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Merge Tiles</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --cell: #273449;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --bw: min(92vw, 440px);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: radial-gradient(circle at 50% 0%, #1e293b 0%, var(--bg) 70%);
+    color: var(--text);
+    font-family: "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 24px 16px; user-select: none; -webkit-user-select: none;
+  }
+  header { width: var(--bw); display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+  h1 { margin: 0; font-size: clamp(26px, 7vw, 38px); letter-spacing: .02em;
+       background: linear-gradient(90deg, #38bdf8, #a78bfa, #f472b6); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .scores { display: flex; gap: 6px; }
+  .score { background: var(--panel); border-radius: 10px; padding: 6px 12px; text-align: center; min-width: 70px; }
+  .score small { display: block; font-size: 11px; color: var(--muted); letter-spacing: .1em; }
+  .score b { font-size: 18px; }
+  .controls { width: var(--bw); display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 8px; }
+  .controls p { margin: 0; font-size: 13px; color: var(--muted); }
+  .btns { display: flex; gap: 6px; }
+  button {
+    background: var(--panel); color: var(--text); border: 1px solid #334155; border-radius: 10px;
+    padding: 8px 14px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit;
+  }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: default; border-color: #334155; }
+  button.primary { background: var(--accent); color: #0f172a; border-color: var(--accent); }
+
+  #board {
+    position: relative; width: var(--bw); height: var(--bw);
+    background: var(--panel); border-radius: 14px; touch-action: none;
+    box-shadow: 0 20px 50px rgba(0,0,0,.4);
+  }
+  .cell, .tile { position: absolute; width: var(--size, 21.25%); height: var(--size, 21.25%); border-radius: calc(10px * var(--fs, 1)); }
+  .cell { background: var(--cell); }
+  .tile {
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: calc(var(--bw) * .09 * var(--fs, 1));
+    transition: top .11s ease-in-out, left .11s ease-in-out;
+    z-index: 1;
+  }
+  .tile.d3 { font-size: calc(var(--bw) * .072 * var(--fs, 1)); }
+  .tile.d4 { font-size: calc(var(--bw) * .058 * var(--fs, 1)); }
+  .tile.d5 { font-size: calc(var(--bw) * .046 * var(--fs, 1)); }
+  .controls { flex-wrap: wrap; }
+  .seg { display: flex; border: 1px solid #334155; border-radius: 10px; overflow: hidden; }
+  .seg button { border: none; border-radius: 0; padding: 8px 10px; background: var(--panel); color: var(--muted); }
+  .seg button.active { background: #334155; color: var(--accent); }
+  .tile.new { animation: appear .18s ease-out; }
+  .tile.merged { animation: pop .2s ease-out; z-index: 2; }
+  @keyframes appear { from { transform: scale(0); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  @keyframes pop { 0% { transform: scale(1); } 50% { transform: scale(1.18); } 100% { transform: scale(1); } }
+
+  .overlay {
+    position: absolute; inset: 0; border-radius: 14px; z-index: 10;
+    background: rgba(15, 23, 42, .78); backdrop-filter: blur(3px);
+    display: none; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    animation: fade .3s ease;
+  }
+  .overlay.show { display: flex; }
+  .overlay h2 { margin: 0; font-size: clamp(28px, 8vw, 40px); }
+  .overlay .row { display: flex; gap: 8px; }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+  .gain {
+    position: absolute; right: 12px; top: -4px; font-size: 14px; font-weight: 800; color: var(--accent);
+    animation: rise .7s ease-out forwards; pointer-events: none;
+  }
+  .score { position: relative; }
+  @keyframes rise { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(-24px); } }
+  footer { margin-top: 16px; font-size: 12px; color: var(--muted); text-align: center; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Merge Tiles</h1>
+    <div class="scores">
+      <div class="score" id="scoreBox"><small>SCORE</small><b id="score">0</b></div>
+      <div class="score"><small>BEST</small><b id="best">0</b></div>
+    </div>
+  </header>
+  <div class="controls">
+    <p>同じ数字をくっつけて <b id="goal">2048</b> を目指そう</p>
+    <div class="btns">
+      <div class="seg" title="盤面サイズ（切り替えると新しいゲーム）">
+        <button data-size="4">4×4</button><button data-size="5">5×5</button>
+      </div>
+      <button id="soundBtn" title="効果音のオン/オフ (M)">🔊</button>
+      <button id="undoBtn" title="1手戻す (Z)">↶ 戻す</button>
+      <button id="newBtn" class="primary">New</button>
+    </div>
+  </div>
+
+  <div id="board">
+    <div class="overlay" id="overlay">
+      <h2 id="ovTitle"></h2>
+      <div class="row">
+        <button id="ovContinue">続ける</button>
+        <button id="ovRetry" class="primary">もう一度</button>
+      </div>
+    </div>
+  </div>
+  <footer>操作：矢印キー / WASD / スワイプ　・　Z で1手戻す　・　M で音のオン/オフ</footer>
+
+<script>
+(() => {
+  let N = 4;
+  try { const s = parseInt(localStorage.getItem('merge-tiles-size'), 10); if (s === 4 || s === 5) N = s; } catch (e) {}
+  let GAP, SIZE; // %（setupBoard で盤面サイズから算出）
+  const COLORS = {
+    2:    ['#e0f2fe', '#0f172a'],
+    4:    ['#bae6fd', '#0f172a'],
+    8:    ['#7dd3fc', '#0f172a'],
+    16:   ['#38bdf8', '#0f172a'],
+    32:   ['#818cf8', '#fff'],
+    64:   ['#6366f1', '#fff'],
+    128:  ['#a78bfa', '#fff'],
+    256:  ['#c084fc', '#fff'],
+    512:  ['#e879f9', '#fff'],
+    1024: ['#f472b6', '#fff'],
+    2048: ['#fb7185', '#fff'],
+  };
+  const SUPER = ['#fbbf24', '#0f172a'];
+
+  const board = document.getElementById('board');
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+  const scoreBox = document.getElementById('scoreBox');
+  const undoBtn = document.getElementById('undoBtn');
+  const overlay = document.getElementById('overlay');
+  const ovTitle = document.getElementById('ovTitle');
+  const ovContinue = document.getElementById('ovContinue');
+  const sizeBtns = document.querySelectorAll('.seg button');
+
+  let grid, score, best = 0, nextId = 1, history = null;
+  let won = false, keepGoing = false, over = false;
+  let pending = null; // 進行中のアニメーション後処理
+  const els = new Map();
+
+  // ベスト記録は盤面サイズごと（4×4 は従来のキーを維持）
+  // 目標の数字（5×5 は 4096）
+  function goal() { return N === 5 ? 4096 : 2048; }
+  function bestKey() { return N === 4 ? 'merge-tiles-best' : 'merge-tiles-best-' + N; }
+  function loadBest() {
+    try { best = parseInt(localStorage.getItem(bestKey()) || '0', 10) || 0; } catch (e) { best = 0; }
+  }
+
+  // ===== 効果音（Web Audio で合成） =====
+  const soundBtn = document.getElementById('soundBtn');
+  let muted = false, actx = null;
+  try { muted = localStorage.getItem('merge-tiles-muted') === '1'; } catch (e) {}
+
+  function audio() {
+    if (muted) return null;
+    if (!actx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      actx = new AC();
+    }
+    if (actx.state === 'suspended') actx.resume();
+    return actx;
+  }
+
+  // 単音: 周波数, 開始遅延(s), 長さ(s), 波形, 音量, 終了周波数(グライド)
+  function tone(freq, delay, dur, type = 'sine', vol = 0.2, endFreq) {
+    const ctx = audio();
+    if (!ctx) return;
+    const t0 = ctx.currentTime + delay;
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t0);
+    if (endFreq) osc.frequency.exponentialRampToValueAtTime(endFreq, t0 + dur);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(g).connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + dur + 0.02);
+  }
+
+  const sfx = {
+    slide()  { tone(220, 0, 0.07, 'triangle', 0.08, 160); },
+    // 数字が大きいほど高い音・和音が厚くなる
+    merge(v) {
+      const step = Math.log2(v) - 1; // 4→1, 8→2, ...
+      const base = 330 * Math.pow(2, Math.min(step, 12) / 6);
+      tone(base, 0, 0.16, 'sine', 0.18);
+      tone(base * 1.5, 0.02, 0.14, 'triangle', 0.07);
+      if (v >= 128) tone(base * 2, 0.04, 0.2, 'sine', 0.06);
+    },
+    blocked() { tone(110, 0, 0.08, 'square', 0.04, 90); },
+    undo()   { tone(520, 0, 0.12, 'sine', 0.12, 300); },
+    newGame(){ [392, 523].forEach((f, i) => tone(f, i * 0.07, 0.12, 'triangle', 0.12)); },
+    win()    { [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.12, i === 3 ? 0.5 : 0.18, 'triangle', 0.18)); },
+    over()   { [392, 330, 262, 196].forEach((f, i) => tone(f, i * 0.16, 0.25, 'sine', 0.15)); },
+  };
+
+  function renderSoundBtn() { soundBtn.textContent = muted ? '🔇' : '🔊'; }
+  function toggleSound() {
+    muted = !muted;
+    try { localStorage.setItem('merge-tiles-muted', muted ? '1' : '0'); } catch (e) {}
+    renderSoundBtn();
+    if (!muted) tone(660, 0, 0.1, 'sine', 0.12);
+  }
+  renderSoundBtn();
+
+  // 盤面サイズに合わせて寸法・背景セル・ベスト記録を設定
+  function setupBoard() {
+    GAP = N === 4 ? 3 : 2.5;
+    SIZE = (100 - GAP * (N + 1)) / N;
+    board.style.setProperty('--size', SIZE + '%');
+    board.style.setProperty('--fs', (4 / N).toFixed(3));
+    board.querySelectorAll('.cell').forEach(el => el.remove());
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      const d = document.createElement('div');
+      d.className = 'cell';
+      d.style.top = pos(r); d.style.left = pos(c);
+      board.insertBefore(d, board.firstChild);
+    }
+    sizeBtns.forEach(b => b.classList.toggle('active', Number(b.dataset.size) === N));
+    document.getElementById('goal').textContent = goal();
+    loadBest();
+  }
+  setupBoard();
+
+  function pos(i) { return (GAP + i * (SIZE + GAP)) + '%'; }
+
+  function createEl(t, cls) {
+    const el = document.createElement('div');
+    const [bg, fg] = COLORS[t.v] || SUPER;
+    const digits = String(t.v).length;
+    el.className = 'tile' + (digits >= 3 ? ' d' + Math.min(digits, 5) : '') + (cls ? ' ' + cls : '');
+    el.style.background = bg; el.style.color = fg;
+    if (t.v >= 128) el.style.boxShadow = `0 0 ${Math.min(30, Math.log2(t.v) * 2)}px ${bg}88`;
+    el.textContent = t.v;
+    el.style.top = pos(t.r); el.style.left = pos(t.c);
+    board.insertBefore(el, overlay);
+    els.set(t.id, el);
+  }
+
+  function removeEl(t) {
+    const el = els.get(t.id);
+    if (el) { el.remove(); els.delete(t.id); }
+  }
+
+  function moveEl(t, r, c) {
+    t.r = r; t.c = c;
+    const el = els.get(t.id);
+    if (el) { el.style.top = pos(r); el.style.left = pos(c); }
+  }
+
+  function emptyCells() {
+    const out = [];
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) if (!grid[r][c]) out.push([r, c]);
+    return out;
+  }
+
+  function spawn() {
+    const empty = emptyCells();
+    if (!empty.length) return;
+    const [r, c] = empty[Math.floor(Math.random() * empty.length)];
+    const t = { id: nextId++, v: Math.random() < 0.9 ? 2 : 4, r, c };
+    grid[r][c] = t;
+    createEl(t, 'new');
+  }
+
+  function snapshot() {
+    return { values: grid.map(row => row.map(t => t ? t.v : 0)), score, won, keepGoing };
+  }
+
+  function rebuild(values) {
+    els.forEach(el => el.remove()); els.clear();
+    grid = values.map((row, r) => row.map((v, c) => {
+      if (!v) return null;
+      const t = { id: nextId++, v, r, c };
+      createEl(t);
+      return t;
+    }));
+  }
+
+  function newGame() {
+    flush();
+    els.forEach(el => el.remove()); els.clear();
+    grid = Array.from({ length: N }, () => Array(N).fill(null));
+    score = 0; won = false; keepGoing = false; over = false; history = null;
+    hideOverlay();
+    spawn(); spawn();
+    updateScore(0);
+    if (started) sfx.newGame();
+    started = true;
+  }
+  let started = false;
+
+  function undo() {
+    if (!history) return;
+    flush();
+    rebuild(history.values);
+    score = history.score; won = history.won; keepGoing = history.keepGoing;
+    over = false; history = null;
+    hideOverlay();
+    updateScore(0);
+    sfx.undo();
+  }
+
+  function updateScore(gain) {
+    scoreEl.textContent = score;
+    if (score > best) {
+      best = score;
+      try { localStorage.setItem('merge-tiles-best', best); } catch (e) {}
+    }
+    bestEl.textContent = best;
+    undoBtn.disabled = !history;
+    if (gain > 0) {
+      const g = document.createElement('div');
+      g.className = 'gain'; g.textContent = '+' + gain;
+      scoreBox.appendChild(g);
+      setTimeout(() => g.remove(), 700);
+    }
+  }
+
+  function flush() {
+    if (pending) { clearTimeout(pending.timer); pending.run(); pending = null; }
+  }
+
+  // dir: 0=左 1=右 2=上 3=下
+  function move(dir) {
+    if (over || (won && !keepGoing)) return;
+    flush();
+    const prev = snapshot();
+    let moved = false, gained = 0;
+    const toRemove = [], toAdd = [];
+
+    for (let i = 0; i < N; i++) {
+      const coords = [];
+      for (let j = 0; j < N; j++) {
+        if (dir === 0) coords.push([i, j]);
+        else if (dir === 1) coords.push([i, N - 1 - j]);
+        else if (dir === 2) coords.push([j, i]);
+        else coords.push([N - 1 - j, i]);
+      }
+      const line = coords.map(([r, c]) => grid[r][c]).filter(Boolean);
+      coords.forEach(([r, c]) => { grid[r][c] = null; });
+
+      let k = 0;
+      for (let x = 0; x < line.length; x++, k++) {
+        const t = line[x];
+        const [r, c] = coords[k];
+        const u = line[x + 1];
+        if (u && u.v === t.v) {
+          moveEl(t, r, c); moveEl(u, r, c);
+          toRemove.push(t, u);
+          const nt = { id: nextId++, v: t.v * 2, r, c };
+          grid[r][c] = nt; toAdd.push(nt);
+          gained += nt.v; moved = true; x++;
+        } else {
+          if (t.r !== r || t.c !== c) moved = true;
+          moveEl(t, r, c);
+          grid[r][c] = t;
+        }
+      }
+    }
+
+    if (!moved) { sfx.blocked(); return; }
+    history = prev;
+    score += gained;
+
+    if (toAdd.length) sfx.merge(Math.max(...toAdd.map(t => t.v)));
+    else sfx.slide();
+
+    const run = () => {
+      toRemove.forEach(removeEl);
+      toAdd.forEach(t => createEl(t, 'merged'));
+    };
+    pending = { run, timer: setTimeout(() => { run(); pending = null; }, 110) };
+
+    spawn();
+    updateScore(gained);
+
+    if (!won && toAdd.some(t => t.v >= goal())) {
+      won = true;
+      setTimeout(() => { showOverlay(`🎉 ${goal()} 達成！`, true); sfx.win(); }, 300);
+    } else if (!canMove()) {
+      over = true;
+      setTimeout(() => { showOverlay('ゲームオーバー', false); sfx.over(); }, 400);
+    }
+  }
+
+  function canMove() {
+    for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+      const t = grid[r][c];
+      if (!t) return true;
+      if (c + 1 < N && grid[r][c + 1] && grid[r][c + 1].v === t.v) return true;
+      if (r + 1 < N && grid[r + 1][c] && grid[r + 1][c].v === t.v) return true;
+    }
+    return false;
+  }
+
+  function showOverlay(title, canContinue) {
+    ovTitle.textContent = title;
+    ovContinue.style.display = canContinue ? '' : 'none';
+    overlay.classList.add('show');
+  }
+  function hideOverlay() { overlay.classList.remove('show'); }
+
+  // 入力
+  const KEYS = {
+    ArrowLeft: 0, ArrowRight: 1, ArrowUp: 2, ArrowDown: 3,
+    a: 0, d: 1, w: 2, s: 3, A: 0, D: 1, W: 2, S: 3,
+  };
+  document.addEventListener('keydown', e => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key in KEYS) { e.preventDefault(); move(KEYS[e.key]); }
+    else if (e.key === 'z' || e.key === 'Z') undo();
+    else if (e.key === 'm' || e.key === 'M') toggleSound();
+  });
+
+  let sx = 0, sy = 0, touching = false;
+  board.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1) return;
+    touching = true; sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+  }, { passive: true });
+  board.addEventListener('touchmove', e => { if (touching) e.preventDefault(); }, { passive: false });
+  board.addEventListener('touchend', e => {
+    if (!touching) return;
+    touching = false;
+    const dx = e.changedTouches[0].clientX - sx;
+    const dy = e.changedTouches[0].clientY - sy;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < 30) return;
+    if (Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? 1 : 0);
+    else move(dy > 0 ? 3 : 2);
+  });
+
+  document.getElementById('newBtn').addEventListener('click', newGame);
+  document.getElementById('ovRetry').addEventListener('click', newGame);
+  undoBtn.addEventListener('click', undo);
+  soundBtn.addEventListener('click', toggleSound);
+  sizeBtns.forEach(b => b.addEventListener('click', () => {
+    const s = Number(b.dataset.size);
+    if (s === N) return;
+    flush();
+    N = s;
+    try { localStorage.setItem('merge-tiles-size', s); } catch (e) {}
+    setupBoard();
+    newGame();
+  }));
+  ovContinue.addEventListener('click', () => { keepGoing = true; hideOverlay(); });
+
+  newGame();
+})();
+</script>
+</body>
+</html>
